@@ -17,6 +17,5 @@ projects/*
 !projects/README.md
 
 # private
-_docs/
 .env
 !.env.sample
