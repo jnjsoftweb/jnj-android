@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from utils.adb_simple import SimpleADBController
 from utils.game_controller import GameController
+from utils.ui_config import reload_ui_config
 
 # Setup logging
 logging.basicConfig(
@@ -71,10 +72,16 @@ async def startup_event():
     try:
         # Initialize ADB controller
         adb_controller = SimpleADBController()
-        if not adb_controller.connect():
-            logger.error("Failed to connect to Waydroid")
-        else:
-            logger.info("Connected to Waydroid")
+        # Try to connect, but don't fail if Waydroid is not running yet
+        # It will be started automatically when needed
+        try:
+            if adb_controller.connect():
+                logger.info("Connected to Waydroid")
+            else:
+                logger.warning("Waydroid not running - will start automatically when needed")
+        except Exception as e:
+            logger.warning(f"Could not connect to Waydroid at startup: {e}")
+            logger.info("Waydroid will be started automatically when needed")
 
         # Initialize game controller
         game_controller = GameController(adb_controller)
@@ -142,7 +149,7 @@ async def start_game(request: GameStartRequest):
 
 @app.post("/api/game/stop")
 async def stop_game(request: GameEndRequest):
-    """Stop Rise of Kingdoms"""
+    """Stop Rise of Kingdoms (send to background with HOME button)"""
     if not game_controller:
         raise HTTPException(status_code=500, detail="Game controller not initialized")
 
@@ -156,6 +163,25 @@ async def stop_game(request: GameEndRequest):
 
     except Exception as e:
         logger.error(f"Error stopping game: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/game/end")
+async def end_game():
+    """Completely terminate Rise of Kingdoms process (force stop)"""
+    if not game_controller:
+        raise HTTPException(status_code=500, detail="Game controller not initialized")
+
+    try:
+        success = game_controller.end_game(force=True)
+
+        if success:
+            return {"status": "success", "message": "Game terminated successfully"}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to terminate game")
+
+    except Exception as e:
+        logger.error(f"Error terminating game: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -190,6 +216,83 @@ async def get_game_status():
 
     except Exception as e:
         logger.error(f"Error getting game status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/game/check-main-screen")
+async def check_main_screen():
+    """Check if game is in main screen (fully loaded)"""
+    if not game_controller:
+        raise HTTPException(status_code=500, detail="Game controller not initialized")
+
+    try:
+        is_in_main = game_controller.is_in_main_game()
+        return {
+            "status": "success",
+            "in_main_game": is_in_main,
+            "message": "In main game screen" if is_in_main else "Not in main game (loading or at startup screen)"
+        }
+
+    except Exception as e:
+        logger.error(f"Error checking main screen: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/config/reload")
+async def reload_config():
+    """Reload UI configuration from JSON files"""
+    try:
+        reload_ui_config()
+        return {
+            "status": "success",
+            "message": "UI configuration reloaded successfully"
+        }
+
+    except Exception as e:
+        logger.error(f"Error reloading config: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/weston/check-lock")
+async def check_weston_lock():
+    """Check if Weston desktop is locked"""
+    if not game_controller:
+        raise HTTPException(status_code=500, detail="Game controller not initialized")
+
+    try:
+        is_locked = game_controller.is_weston_locked()
+        return {
+            "status": "success",
+            "is_locked": is_locked,
+            "message": "Weston is locked (green unlock circle detected)" if is_locked else "Weston is unlocked"
+        }
+
+    except Exception as e:
+        logger.error(f"Error checking Weston lock: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/weston/pixel-color")
+async def get_pixel_color(x: int, y: int):
+    """Get RGB color at specific coordinates"""
+    if not game_controller:
+        raise HTTPException(status_code=500, detail="Game controller not initialized")
+
+    try:
+        color = game_controller.get_pixel_color(x, y)
+        if color:
+            return {
+                "status": "success",
+                "x": x,
+                "y": y,
+                "color": {"r": color[0], "g": color[1], "b": color[2]},
+                "hex": f"#{color[0]:02x}{color[1]:02x}{color[2]:02x}"
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to get pixel color")
+
+    except Exception as e:
+        logger.error(f"Error getting pixel color: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
